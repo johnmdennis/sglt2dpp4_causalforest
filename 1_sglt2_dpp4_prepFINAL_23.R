@@ -374,6 +374,70 @@ cprd_bckup <- cprd
 #   highlyCorCol <- colnames(test)[highlyCorrelated]
 #   highlyCorCol
   
+####################
+#Add additional risk factors
+####################
+    
+###########################      
+# Add comorbidity
+###########################      
+load("C:/Users/jmd237/OneDrive - University of Exeter/John/CPRD/CPRD_19_Comorbidities/cprd.comorbidity.Rda") 
+
+#Merge in comorbidity
+cprd.comorbidity$patid <- NULL
+final.all <- merge(final.all,cprd.comorbidity,by="pateddrug",all.x=TRUE)
+
+head(final.all)
+
+# Established ASCVD: MI, ischemic stroke, unstable angina with ECG changes, myocardial ischemia on imaging or stress test, revascularisation of coronary, carotid or peripheral arteries.
+# High risk ASCVD: Age 55 + Left ventricular hypertrophy or coronary, carotid, lower extremity artery stenosis >50%
+# HF especially HFrEF (EF <45%)
+# CKD - eGFR 30-60 or UACR>30 (preferably >300) - says 300 in main flow.
+
+final.all <- final.all %>% mutate(ascvd=if_else(predrug.earliest.mi==1|predrug.earliest.stroke==1|predrug.earliest.revasc==1|predrug.earliest.pad==1|predrug.earliest.ihd==1,1,0))
+table(final.all$ascvd);prop.table(table(final.all$ascvd))
+describe(final.all$ascvd)
+
+final.all <- final.all %>% mutate(ascvd.hf=if_else(ascvd==1|predrug.earliest.heartfailure==1,1,0)) 
+table(final.all$ascvd.hf);prop.table(table(final.all$ascvd.hf))
+describe(final.all$ascvd.hf)
+
+final.all <- final.all %>% mutate(ckd=if_else(predrug.earliest.ckd5==1|egfr_ckdepi<60,1,0)) 
+final.all <- final.all %>% mutate(ckd=if_else(is.na(ckd),0,ckd))
+table(final.all$ckd);prop.table(table(final.all$ckd))
+describe(final.all$ckd)
+
+final.all <- final.all %>% mutate(ascvd.hf.ckd=if_else(ascvd.hf==1|ckd==1,1,0)) 
+table(final.all$ascvd.hf.ckd);prop.table(table(final.all$ascvd.hf.ckd))
+describe(final.all$ascvd.hf.ckd)
+
+final.all <- final.all %>% mutate(hypertension=if_else(predrug.earliest.hypertension==1,1,0)) 
+
+final.all <- final.all %>% mutate(neuropathy=if_else(predrug.earliest.neuropathy==1,1,0)) 
+final.all <- final.all %>% mutate(nephropathy=if_else(predrug.earliest.nephropathy==1,1,0)) 
+final.all <- final.all %>% mutate(retinopathy=if_else(predrug.earliest.retinopathy==1,1,0)) 
+final.all <- final.all %>% mutate(hf=if_else(predrug.earliest.heartfailure==1,1,0)) 
+
+##ADD SBP
+
+load("C:/Users/jmd237/OneDrive - University of Exeter/John/local/CPRD/cprd/CPRD_19/data/update/finalcprd19_analysisreadyv3.Rda") 
+cprdv3 <- cprd
+
+#Smoking binary
+describe(final.all$Category)
+final.all <- final.all %>% mutate(smok=as.factor(ifelse(is.na(Category),"Non-smoker",Category)))
+describe(final.all$smok)
+
+#chol
+cprd.tc.sys <- cprdv3 %>% dplyr::select(pateddrug,pretc,presys)
+final.all <- merge(final.all,cprd.tc.sys,all.x=T, by="pateddrug")
+describe(final.all$pretc)
+final.all$chol <- final.all$pretc
+
+#sbp
+describe(final.all$presys)
+final.all$sbp <- final.all$presys
+
 #################### 
 #save
 ####################
