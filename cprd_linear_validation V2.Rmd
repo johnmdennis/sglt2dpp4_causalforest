@@ -37,6 +37,12 @@ library(glmnet)
 library(viridis)
 library(ggthemes)
 library(patchwork)
+
+# output directories
+output_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2020_SGLTvDPP4_ML/results/cprd_validation/" 
+model_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2020_SGLTvDPP4_ML/models/"
+data_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/local/CPRD/cprd/CPRD_19/data/update/"
+
 ```
 Define functions
 ```{r HTE functions, include=FALSE}
@@ -211,8 +217,8 @@ hte_plot_fixed <- function(data,pred,obs,obslowerci,obsupperci) {
     geom_vline(xintercept=0, linetype="dashed", color = "grey60") + geom_hline(yintercept=0, linetype="dashed", color = "grey60") 
 }
 ```
-Define global setting
-``` {r define global settings}
+Define global setting and load data
+``` {r define global settings, include=FALSE}
 #define model formula
 formula1 <- "posthba1c_final~factor(drugclass)"
 formula2 <- "posthba1c_final~factor(drugclass)+BASELINE.DAY.1+ncurrtx+drugline+hba1cmonth"
@@ -221,26 +227,19 @@ formula3 <- "posthba1c_final~factor(drugclass)+BASELINE.DAY.1+ncurrtx+drugline+h
 modelname <- c("unadj","simple","full")
 f <- as.list(c(formula1,formula2,formula3))
 
-#set save directory
-setwd("C:/Users/jmd237/Documents/Projects/2020_SGLTvDPP4_ML/results/cprd_validation")
-
 #plot options for .pdf
 pdf.options(reset = TRUE, onefile = FALSE)
-dev.off; dev.off; dev.off
-#load models
-load("~/Projects/2020_SGLTvDPP4_ML/models/penlm.int.cprd.Rdata")
-load("~/Projects/2020_SGLTvDPP4_ML/models/penlm.sglt2.cprd.Rdata")
-load("~/Projects/2020_SGLTvDPP4_ML/models/penlm.dpp4.cprd.Rdata")
-load("~/Projects/2020_SGLTvDPP4_ML/models/c_forestAV_CPRD.Rdata")
-# load("C:/C_my_docs/CPRD/cprd/CPRD_19/data/update/collins.int.logistic.Rdata")
-# m_sat_log <- m_sat
-# load("C:/C_my_docs/CPRD/cprd/CPRD_19/data/update/collins.int.linear.Rdata")
-```
 
+#load models
+load(paste0(model_dir,"penlm.int.cprd.Rdata"))
+load(paste0(model_dir,"penlm.sglt2.cprd.Rdata"))
+load(paste0(model_dir,"penlm.dpp4.cprd.Rdata"))
+load(paste0(model_dir,"c_forestAV_CPRD.Rdata"))
+```
 Load CPRD complete cohort, prepare data
 ```{r setup dev, include=FALSE}
-load("C:/C_my_docs/CPRD/cprd/CPRD_19/data/update/cprd_19_sglt2dpp4_allcohort.Rda")
-final <- finalall
+load(paste0(data_dir,"cprd_19_sglt2dpp4_allcohort23.Rda"))
+final <- final.all
 
 #further preprocessing
 final$pretriglog <- log(final$pretrig)
@@ -258,13 +257,25 @@ final$ethnicityF <- relevel(final$ethnicityF,ref="White")
 final$dummy <- NULL
 final$dummy2 <- NULL
 
+final <- final %>% mutate(flnonadh=ifelse(is.na(as.numeric(flnonadh)-1),0,as.numeric(flnonadh)-1))
+describe(final$flnonadh)
+table(final$flnonadh)
+
 ####################
 #Final input model
-####################
+
+
+#Define time on first-line therapy
 
 final.c <- final %>% select(pateddrug,drugclass,drugline,ncurrtx,
-                                posthba1c_final,malesex,ethnicityF,agetx,t2dmduration,
-                                prehba1cmmol,egfr_ckdepi,prehdl,pretriglog,prebmi,prealtlog,prealb,hba1cmonth,preldl,prebillog,prealt,pretrig,prebil)
+                                posthba1c_final,malesex,ethnicityF,agetx,
+                                prehba1cmmol,egfr_ckdepi,prehdl,pretriglog,prebmi,prealtlog,prealb,hba1cmonth,preldl,prebillog,prealt,pretrig,prebil,
+                            #confounders
+                            drugline,ncurrtx,
+                            ethnicityF,smok,t2dmduration,
+                            hypertension,neuropathy,nephropathy,retinopathy,ckd,ascvd,hf,
+                            flnonadh
+                            )
 final.c <- data.frame(final.c)
 
 final.c$posthba1c_final <- round(final.c$posthba1c_final,0)
@@ -284,10 +295,12 @@ table(final.c$drugclass)
   print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F)
   stargazer(print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F),out="CPRDall.Table1.html")
 ```
+
+Analysis used in original paper submission
 Linear regression model HTE analysis - full data
 ```{r lm HTE analysis}
 #final data prep
-  final <- d.rename(final.c)
+  final <- d.rename(final.c) %>% filter(!is.na(posthba1c_final))
 
 #Model predicted treatment difference
   final <- hte.pred(final,full.pen.m1,full.pen.m1); model_name <- "YODA.lm_int" #Interaction model
@@ -443,7 +456,7 @@ Causal Forest model HTE analysis - full data
 ```{r CF HTE analysis}
 model_name <- "YODA.cf"
 
-final <- d.rename(final.c)
+final <- d.rename(final.c) %>% filter(!is.na(posthba1c_final))
 
 #Set HbA1c as % to match model
 final <- final %>% mutate(BASELINE.DAY.1 = (BASELINE.DAY.1/10.929)+2.15) %>% na.omit
@@ -655,6 +668,9 @@ final <- hte.pred.cf(final)
 ```
 
 
+
+
+Old stuff not used for paper
 
 Load CPRD val cohort (40% subset)
 To compare the model developed in CPRD on 60% with the YODA model
