@@ -224,6 +224,9 @@ formula1 <- "posthba1c_final~factor(drugclass)"
 formula2 <- "posthba1c_final~factor(drugclass)+BASELINE.DAY.1+ncurrtx+drugline+hba1cmonth"
 formula3 <- "posthba1c_final~factor(drugclass)+BASELINE.DAY.1+ncurrtx+drugline+hba1cmonth+AGE+Glomerular.Filtration.Rate.Corrected+BMI+
   log_Alanine.Aminotransferase+malesex+Albumin+log_Bilirubin+LDL.Cholesterol+LDL.Cholesterol+log_Triglycerides"
+formula4 <- "posthba1c_final~factor(drugclass)+BASELINE.DAY.1+ncurrtx+drugline+hba1cmonth+AGE+Glomerular.Filtration.Rate.Corrected+BMI+
+  log_Alanine.Aminotransferase+malesex+Albumin+log_Bilirubin+LDL.Cholesterol+LDL.Cholesterol+log_Triglycerides+
+  ethnicityF+smok+t2dmduration+hypertension+neuropathy+nephropathy+retinopathy+ckd+ascvd+hf+flnonadh"
 modelname <- c("unadj","simple","full")
 f <- as.list(c(formula1,formula2,formula3))
 
@@ -676,6 +679,104 @@ Analysis for paper revision
 ```{r lm HTE analysis update}
 #final data prep
 final <- d.rename(final.c) 
+
+#Keep only patients with complete predictor set
+final <- final %>% filter(complete.cases(BMI,AGE,malesex,BASELINE.DAY.1,Alanine.Aminotransferase,
+                                         Albumin,Bilirubin,Glomerular.Filtration.Rate.Corrected,HDL.Cholesterol,LDL.Cholesterol,Triglycerides))
+                                  
+#Inverse probability of censoring weighting
+  # https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=&ved=2ahUKEwjB3ML14Kf-AhUaQUEAHRZUBq4QFnoECEIQAQ&url=https%3A%2F%2Fbozenne.github.io%2Fdoc%2F2021_08_03-IPCW%2Fpost-IPCW.pdf&usg=AOvVaw2zYeLZHR_kctz-R3kRDiYz
+  #Model probability of observed outcome (has outcome HbA1c)
+    final$obs <- as.numeric(!is.na(final$posthba1c_final))
+    
+    m.obs <- lrm(obs ~ drugline+ncurrtx+ethnicityF+smok+t2dmduration+hypertension+neuropathy+nephropathy+retinopathy+ckd+ascvd+hf+flnonadh+
+                 BMI+AGE+malesex+BASELINE.DAY.1+Alanine.Aminotransferase+Albumin+Bilirubin+Glomerular.Filtration.Rate.Corrected+HDL.Cholesterol+LDL.Cholesterol+Triglycerides,
+                 data=final)
+    m.obs
+    
+    # final$censwt <- 1/predict(m.obs, newdata = final, type = "fitted")
+    
+    final$obsprob <- predict(m.obs, newdata = final, type = "fitted")
+    final <- final %>% mutate(obsprob=ifelse(obs==1,obsprob,1-obsprob))
+    final <- final %>% mutate(censwt=1/obsprob)
+    head(final)
+    
+    final %>% group_by(obs) %>% dplyr::summarise(sum=sum(censwt)) #if obs == 1, total weights near equal to total sample size
+
+    #Stabilise the weights
+    
+    #define prob of being observed
+    num.fit <- glm(obs ~ 1,data=final, family = binomial)
+    num.pred <- predict(num.fit, type = "response")
+    #Define stabilised weights
+    final$censwt_s <- ifelse(final$obs == 1, num.pred/final$obsprob, (1-num.pred)/(1-final$obsprob))    
+    
+    final %>% group_by(obs) %>% dplyr::summarise(sum=sum(censwt_s))
+    
+#Inverse probability of treatment weighting
+  
+  #Model probability of receiving SGLT2
+    
+    final <- final %>% mutate(sglt2 = as.numeric(ifelse(drugclass=="SGLT2",1,0)))
+    table(final$sglt2)
+    
+    m.sglt2 <- lrm(sglt2 ~ drugline+ncurrtx+ethnicityF+smok+t2dmduration+hypertension+neuropathy+nephropathy+retinopathy+ckd+ascvd+hf+flnonadh+
+                 BMI+AGE+malesex+BASELINE.DAY.1+Alanine.Aminotransferase+Albumin+Bilirubin+Glomerular.Filtration.Rate.Corrected+HDL.Cholesterol+LDL.Cholesterol+Triglycerides,
+                 data=final)
+    m.sglt2
+    
+    final$sglt2prob <- predict(m.sglt2, newdata = final, type = "fitted")
+    final <- final %>% mutate(sglt2prob=ifelse(sglt2==1,sglt2prob,1-sglt2prob))
+    final <- final %>% mutate(sglt2wt=1/sglt2prob)
+    head(final)
+    
+    describe(final$sglt2wt) #no extreme weights
+    
+    final %>% group_by(sglt2) %>% dplyr::summarise(sum=sum(sglt2wt)) 
+
+    #Stabilise the weights
+    #https://stats.stackexchange.com/questions/411711/why-do-stabilized-ipw-weights-give-the-same-estimates-and-ses-as-unstabilized-we
+    #define prob of being observed
+    num.fit <- glm(sglt2 ~ 1,data=final, family = binomial)
+    num.pred <- predict(num.fit, type = "response")
+    #Define stabilised weights
+    final$sglt2wt_s <- ifelse(final$sglt2 == 1, num.pred/final$sglt2prob, (1-num.pred)/(1-final$sglt2prob))    
+    
+    final %>% group_by(obs) %>% dplyr::summarise(sum=sum(sglt2wt_s))
+
+    
+#multiply the IPCW weights obtained from the censoring model with the IPTW weights from the treatment model doi:10.1136/bmjdrc-2017-000435
+    final <- final %>% mutate(combwt=censwt*sglt2wt)
+    describe(final$combwt) 
+      
+    final <- final %>% mutate(combwt_s=censwt_s*sglt2wt_s)
+    describe(final$combwt_s) 
+    
+#Test ATE
+    #Unadjusted
+    summary(lm(posthba1c_final~drugclass,data=final))
+    summary(lm(posthba1c_final~drugclass,data=final,weights=censwt))
+    summary(lm(posthba1c_final~drugclass,data=final,weights=sglt2wt))
+    summary(lm(posthba1c_final~drugclass,data=final,weights=combwt))
+
+    #Predictor adjusted
+    summary(lm(as.formula(formula3),data=final))
+    summary(lm(as.formula(formula3),data=final,weights=censwt))
+    summary(lm(as.formula(formula3),data=final,weights=sglt2wt))
+    summary(lm(as.formula(formula3),data=final,weights=combwt))
+
+    #Predictor + confounder adjusted
+    summary(lm(as.formula(formula4),data=final))
+    summary(lm(as.formula(formula4),data=final,weights=censwt))
+    summary(lm(as.formula(formula4),data=final,weights=sglt2wt))
+    summary(lm(as.formula(formula4),data=final,weights=combwt))
+    
+    #Predictor + confounder adjusted, stablised weights
+    summary(lm(as.formula(formula4),data=final))
+    summary(lm(as.formula(formula4),data=final,weights=censwt_s))
+    summary(lm(as.formula(formula4),data=final,weights=sglt2wt_s))
+    summary(lm(as.formula(formula4),data=final,weights=combwt_s))
+
 '''
 
 
