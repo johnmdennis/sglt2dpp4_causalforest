@@ -267,6 +267,10 @@ table(final$flnonadh)
 
 #Define time on first-line therapy
 
+# final.c <- final %>% select(pateddrug,drugclass,drugline,ncurrtx,
+#                                 posthba1c_final,malesex,ethnicityF,agetx,t2dmduration,
+#                                 prehba1cmmol,egfr_ckdepi,prehdl,pretriglog,prebmi,prealtlog,prealb,hba1cmonth,preldl,prebillog,prealt,pretrig,prebil)
+
 final.c <- final %>% select(pateddrug,drugclass,drugline,ncurrtx,
                                 posthba1c_final,malesex,ethnicityF,agetx,
                                 prehba1cmmol,egfr_ckdepi,prehdl,pretriglog,prebmi,prealtlog,prealb,hba1cmonth,preldl,prebillog,prealt,pretrig,prebil,
@@ -285,7 +289,7 @@ describe(final.c)
 # require(missForest)
 # impbase <- missForest(final.c[,-1])
 
-final.c <- final.c[complete.cases(final.c), ]
+#final.c <- final.c[complete.cases(final.c), ]
 table(final.c$drugclass)
 
 #Table one by drug 
@@ -300,7 +304,7 @@ Analysis used in original paper submission
 Linear regression model HTE analysis - full data
 ```{r lm HTE analysis}
 #final data prep
-  final <- d.rename(final.c) %>% filter(!is.na(posthba1c_final))
+  final <- final.c[complete.cases(final.c), ]
 
 #Model predicted treatment difference
   final <- hte.pred(final,full.pen.m1,full.pen.m1); model_name <- "YODA.lm_int" #Interaction model
@@ -456,14 +460,14 @@ Causal Forest model HTE analysis - full data
 ```{r CF HTE analysis}
 model_name <- "YODA.cf"
 
-final <- d.rename(final.c) %>% filter(!is.na(posthba1c_final))
+final <- final.c[complete.cases(final.c), ]
 
 #Set HbA1c as % to match model
 final <- final %>% mutate(BASELINE.DAY.1 = (BASELINE.DAY.1/10.929)+2.15) %>% na.omit
 
 #Subset matrix of baseline data for c.forest predict
 head(final)
-head(final[,c(14,8,6,10,20,16,22,11,12,18,21)],2)
+head(final[,c(13,8,6,9,19,15,21,10,11,17,20)],2)
 
 df <- model.matrix(~., data=final[,c(14,8,6,10,20,16,22,11,12,18,21)])[,-1]
 
@@ -668,10 +672,15 @@ final <- hte.pred.cf(final)
 ```
 
 
+Analysis for paper revision
+```{r lm HTE analysis update}
+#final data prep
+final <- d.rename(final.c) 
+'''
+
 
 
 Old stuff not used for paper
-
 Load CPRD val cohort (40% subset)
 To compare the model developed in CPRD on 60% with the YODA model
 ```{r val cohort setup, include=FALSE}
