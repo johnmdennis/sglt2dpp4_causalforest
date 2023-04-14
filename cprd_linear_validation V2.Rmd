@@ -117,7 +117,9 @@ hte.model.coefs.wt <- function(x,nmodels) {
   data <- x
   
   for(i in mnumber) {
-    models[[i]] <- lm(as.formula(f[[i]]),data=data,weights=censwt)
+    models[[i]] <- lm(as.formula(f[[i]]),data=data,weights=wt)
+    # models[[i]] <- lm(as.formula(f[[i]]),data=data,weights=eval(substitute(wt), df))
+    # models[[i]] <- lm(as.formula(f[[i]]),data=data,weights=eval(substitute(wt)))
     nobs <- append(nobs,nobs(models[[i]]))
     coef <- append(coef,models[[i]]$coefficients[2])
     confint_all <- confint(models[[i]], levels=0.95)
@@ -335,13 +337,25 @@ Analysis used in original paper submission
 Linear regression model HTE analysis - full data
 ```{r lm HTE analysis}
 #final data prep
-  final <- final.c[complete.cases(final.c), ]
+  #final data prep
+  final <- d.rename(final.c)
+  final <- final[complete.cases(final), ]
 
 #Model predicted treatment difference
-  final <- hte.pred(final,full.pen.m1,full.pen.m1); model_name <- "YODA.lm_int" #Interaction model
-  #final <- hte.pred(final,m_drugA,m_drugB); model_name <- "YODA.lm_sep" #Separate models
+  # final <- hte.pred(final,full.pen.m1,full.pen.m1); model_name <- "YODA.lm_int" #Interaction model
+  # #final <- hte.pred(final,m_drugA,m_drugB); model_name <- "YODA.lm_sep" #Separate models
+  # head(final)
+
+  final <- final %>% mutate(drug="DPP4")
+  final$DPP4.pred.lm2 <- predict(full.pen.m1,final)
+  final <- final %>% mutate(drug="SGLT2")
+  final$SGLT2.pred.lm2 <- predict(full.pen.m1,final)
+  final <- final %>% 
+    mutate(hba1c_diff2 = SGLT2.pred.lm2-DPP4.pred.lm2) %>%
+    mutate(bestdrug2=ifelse(hba1c_diff<=0,"SGLT2","DPP4"))
   head(final)
 
+  
 #brief summary of predicted treatment difference
   describe(final$hba1c_diff)
   hist(final$hba1c_diff,breaks=50); abline(v = 0, col="black", lwd=3, lty=2)
@@ -780,6 +794,9 @@ final <- final %>% filter(complete.cases(BMI,AGE,malesex,BASELINE.DAY.1,Alanine.
     final <- final %>% mutate(combwt_s=censwt_s*sglt2wt_s)
     describe(final$combwt_s) 
     
+#Define final cohort with complete outcome data
+    final <- final %>% filter(complete.cases(posthba1c_final))
+    
 #Test ATE
     #Unadjusted
     summary(lm(posthba1c_final~drugclass,data=final))
@@ -838,145 +855,426 @@ final <- hte.pred(final,full.pen.m1,full.pen.m1); model_name <- "YODA.lm_int" #I
   hist_plot(final,-2.5,2.3,1100)
 
 #Table one by best drug strata
-  vars = names(final[,-1])
-  factorvars = c("malesex","ethnicityF","drugline","ncurrtx")
-  tab <- CreateTableOne(vars=vars, factorVars = factorvars, strata="bestdrug", data=final,test=T,smd=F)
-  print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F)
+  # vars = names(final[,-1])
+  # factorvars = c("malesex","ethnicityF","drugline","ncurrtx")
+  # tab <- CreateTableOne(vars=vars, factorVars = factorvars, strata="bestdrug", data=final,test=T,smd=F)
+  # print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F)
 
-#Run HTE models and extract coefs
   
-  #Define subsets of interest to calc HTE 
-    #overall
-    overall <- final
-    #sglt2.best
-    sglt2.best <- final %>% dplyr::filter(bestdrug=="SGLT2")
-    #dpp4.best
-    dpp4.best <- final %>% dplyr::filter(bestdrug=="DPP4")
-    #Subgroups by predicted treatment difference
-    df1 <- final %>% dplyr::filter(hba1c_diff<= -10) 
-    df2 <- final %>% dplyr::filter(hba1c_diff<= -5 & hba1c_diff > -10) 
-    df3 <- final %>% dplyr::filter(hba1c_diff<= -3 & hba1c_diff > -5) 
-    df4 <- final %>% dplyr::filter(hba1c_diff> -3 & hba1c_diff <= 0) 
-    df5 <- final %>% dplyr::filter(hba1c_diff> 0 & hba1c_diff < 3) 
-    df6 <- final %>% dplyr::filter(hba1c_diff>= 3) 
-    df7 <- final %>% dplyr::filter(hba1c_diff>= 5) #All DPP4
-    #df8 <- final %>% dplyr::filter(hba1c_diff>= 10) 
+#### Unweighted  
   
-  
-#Run HTE models and extract coefs for each subset
-  dflist <- list(overall,sglt2.best,dpp4.best,df1,df2,df3,df4,df5,df6,df7)
-  res.list <- lapply(dflist, function(df) {
-    hte.model.coefs.wt(df,3)
-  })
-  
-  res.list <- bind_rows(res.list, .id="column_label")
-  res.lab <- c(rep("overall",3),rep("sglt2.best",3),rep("dpp4.best",3),rep("sglt.best10",3),rep("sglt.best5",3),rep("sglt.best3",3),rep("sglt.best0-3",3),
-               rep("dpp4.best0-3",3),rep("dpp4.best3",3),rep("dpp4.best5",3))
-  res.list <- data.frame(res.lab,res.list) %>% dplyr::select(-column_label,-datasetname)
-  res.list %>% dplyr::filter(modelname=="full") #final adjusted list
-
-#Calibration plot HTE
-  
-  #Unadjusted obs vs pred (may be different treatment line etc.)
-  
-    #Define tenths
-    final <- final %>% mutate(hba1c_diff.q = ntile(hba1c_diff, 10))    
+  #Run HTE models and extract coefs
     
-    #define dataset with predicted values
-    t1 <- ddply(final, "hba1c_diff.q", dplyr::summarise,
-                  N    = length(hba1c_diff),
-                  hba1c_diff.pred = mean(hba1c_diff))
+    #Define weights
+    final$wt <- 1; wtname <- "no_wt"
     
-    #check some patients actually prescribed both drugs in each tenth
-    ddply(final, c("hba1c_diff.q","drugclass"), dplyr::summarise,
-              N    = length(posthba1c_final),
-              posthba1c_final.m = mean(posthba1c_final),
-              se = sd(posthba1c_final)/sqrt((length(posthba1c_final))))
+    #Define subsets of interest to calc HTE 
+      #overall
+      overall <- final
+      #sglt2.best
+      sglt2.best <- final %>% dplyr::filter(bestdrug=="SGLT2")
+      #dpp4.best
+      dpp4.best <- final %>% dplyr::filter(bestdrug=="DPP4")
+      #Subgroups by predicted treatment difference
+      df1 <- final %>% dplyr::filter(hba1c_diff<= -10) 
+      df2 <- final %>% dplyr::filter(hba1c_diff<= -5 & hba1c_diff > -10) 
+      df3 <- final %>% dplyr::filter(hba1c_diff<= -3 & hba1c_diff > -5) 
+      df4 <- final %>% dplyr::filter(hba1c_diff> -3 & hba1c_diff <= 0) 
+      df5 <- final %>% dplyr::filter(hba1c_diff> 0 & hba1c_diff < 3) 
+      df6 <- final %>% dplyr::filter(hba1c_diff>= 3) 
+      df7 <- final %>% dplyr::filter(hba1c_diff>= 5) #All DPP4
+      #df8 <- final %>% dplyr::filter(hba1c_diff>= 10) 
     
-  #obs vs pred, by decile of predicted treatment difference
-  #For Formula 1-3
-      mnumber = c(1:10)
-      models  <- as.list(1:10)
+    
+  #Run HTE models and extract coefs for each subset
+    dflist <- list(overall,sglt2.best,dpp4.best,df1,df2,df3,df4,df5,df6,df7)
+    res.list <- lapply(dflist, function(df) {
+      hte.model.coefs(df,3)
+    })
+    
+    res.list <- bind_rows(res.list, .id="column_label")
+    res.lab <- c(rep("overall",3),rep("sglt2.best",3),rep("dpp4.best",3),rep("sglt.best10",3),rep("sglt.best5",3),rep("sglt.best3",3),rep("sglt.best0-3",3),
+                 rep("dpp4.best0-3",3),rep("dpp4.best3",3),rep("dpp4.best5",3))
+    res.list <- data.frame(res.lab,res.list) %>% dplyr::select(-column_label,-datasetname)
+    res.list %>% dplyr::filter(modelname=="unadj") 
+    res.list %>% dplyr::filter(modelname=="pred")
+    res.list %>% dplyr::filter(modelname=="predconf") #final adjusted list
   
-      hba1c_diff.obs.unadj <- vector()
-      lower.unadj <- vector()
-      upper.unadj <- vector()
-      hba1c_diff.obs.sim <- vector()
-      lower.sim <- vector()
-      upper.sim <- vector() 
-      hba1c_diff.obs.adj <- vector()
-      lower.adj <- vector()
-      upper.adj <- vector() 
+  #Calibration plot HTE
+    
+    #Unadjusted obs vs pred (may be different treatment line etc.)
+    
+      #Define tenths
+      final <- final %>% mutate(hba1c_diff.q = ntile(hba1c_diff, 10))    
       
-      #Unadj
-      for(i in mnumber) {
-        models[[i]] <- lm(as.formula(formula1),data=final,weights=combwt_s, subset=hba1c_diff.q==i)
-        hba1c_diff.obs.unadj <- append(hba1c_diff.obs.unadj,models[[i]]$coefficients[2])
-        confint_all <- confint(models[[i]], levels=0.95)
-        lower.unadj <- append(lower.unadj,confint_all[2,1])
-        upper.unadj <- append(upper.unadj,confint_all[2,2])
-      }
-      #Simple 
-      for(i in mnumber) {
-        models[[i]] <- lm(as.formula(formula2),data=final,weights=combwt_s,subset=hba1c_diff.q==i)
-        hba1c_diff.obs.sim <- append(hba1c_diff.obs.sim,models[[i]]$coefficients[2])
-        confint_all <- confint(models[[i]], levels=0.95)
-        lower.sim <- append(lower.sim,confint_all[2,1])
-        upper.sim <- append(upper.sim,confint_all[2,2])
-      }
-      #Full
-      for(i in mnumber) {
-        models[[i]] <- lm(as.formula(formula3),data=final,weights=combwt_s,subset=hba1c_diff.q==i)
-        hba1c_diff.obs.adj <- append(hba1c_diff.obs.adj,models[[i]]$coefficients[2])
-        confint_all <- confint(models[[i]], levels=0.95)
-        lower.adj <- append(lower.adj,confint_all[2,1])
-        upper.adj <- append(upper.adj,confint_all[2,2])
-      }
+      #define dataset with predicted values
+      t1 <- ddply(final, "hba1c_diff.q", dplyr::summarise,
+                    N    = length(hba1c_diff),
+                    hba1c_diff.pred = mean(hba1c_diff))
       
-    #Final data.frame  
-      t1 <- data.frame(t1,cbind(hba1c_diff.obs.unadj,lower.unadj,upper.unadj,
-                                hba1c_diff.obs.sim,lower.sim,upper.sim,
-                                hba1c_diff.obs.adj,lower.adj,upper.adj))
+      #check some patients actually prescribed both drugs in each tenth
+      ddply(final, c("hba1c_diff.q","drugclass"), dplyr::summarise,
+                N    = length(posthba1c_final),
+                posthba1c_final.m = mean(posthba1c_final),
+                se = sd(posthba1c_final)/sqrt((length(posthba1c_final))))
       
-#Save
-  #Table one by best drug
-  stargazer(print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F),out=paste(model_name,".CPRDall.bestdrugstrataTable1.html",sep=""))
-  #Histogram of predicted treatment difference
-  pdf(paste(model_name,".CPRDall.tdiff.hist.pdf",sep=""),width=6,height=6)
-  hist_plot_fixed(final,-2.5,2.3,500); dev.off()
-  #Subgroup results
-  write_csv(res.list,paste(model_name,".CPRDall.subgroup.res.csv",sep=""))
-  #Plots
-  #unadj
-  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
-  pdf(paste(model_name,".CPRDall.unadj.pdf",sep=""),width=8,height=8)
-  hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci"); dev.off()
-  #simple adj
-  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.sim,lci=lower.sim,uci=upper.sim)
-  pdf(paste(model_name,".CPRDall.simple.adj.pdf",sep=""),width=8,height=8)
-  hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci") ; dev.off()
-  #Adj plot
-  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
-  pdf(paste(model_name,".CPRDall.adj.pdf",sep=""),width=8,height=8)
-  hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci"); dev.off()
-
-  #match to scale of plot for CPRD dev dataset
-  plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
-  pdf(paste(model_name,".CPRDall.adj.scalematch.pdf",sep=""),width=8,height=8)
-  hte_plot_fixed(plotdata,"hba1c_diff.pred","obs","lci","uci"); dev.off()
+    #obs vs pred, by decile of predicted treatment difference
+    #For Formula 1-3
+        mnumber = c(1:10)
+        models  <- as.list(1:10)
+    
+        hba1c_diff.obs.unadj <- vector()
+        lower.unadj <- vector()
+        upper.unadj <- vector()
+        hba1c_diff.obs.sim <- vector()
+        lower.sim <- vector()
+        upper.sim <- vector() 
+        hba1c_diff.obs.adj <- vector()
+        lower.adj <- vector()
+        upper.adj <- vector() 
+        
+        #Unadj
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula1),data=final, subset=hba1c_diff.q==i)
+          hba1c_diff.obs.unadj <- append(hba1c_diff.obs.unadj,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.unadj <- append(lower.unadj,confint_all[2,1])
+          upper.unadj <- append(upper.unadj,confint_all[2,2])
+        }
+        #pred 
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula2),data=final,subset=hba1c_diff.q==i)
+          hba1c_diff.obs.sim <- append(hba1c_diff.obs.sim,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.sim <- append(lower.sim,confint_all[2,1])
+          upper.sim <- append(upper.sim,confint_all[2,2])
+        }
+        #predconf
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula3),data=final,subset=hba1c_diff.q==i)
+          hba1c_diff.obs.adj <- append(hba1c_diff.obs.adj,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.adj <- append(lower.adj,confint_all[2,1])
+          upper.adj <- append(upper.adj,confint_all[2,2])
+        }
+        
+      #Final data.frame  
+        t1 <- data.frame(t1,cbind(hba1c_diff.obs.unadj,lower.unadj,upper.unadj,
+                                  hba1c_diff.obs.sim,lower.sim,upper.sim,
+                                  hba1c_diff.obs.adj,lower.adj,upper.adj))
+        
+  #Save
+    #Table one by best drug
+    #stargazer(print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F),out=paste(model_name,".CPRDall.bestdrugstrataTable1.html",sep=""))
+    #Histogram of predicted treatment difference
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.tdiff.hist.pdf",sep=""),width=6,height=6)
+    hist_plot_fixed(final,-2.5,2.3,500)
+    #dev.off()
+    #Subgroup results
+    write_csv(res.list,paste0(output_dir,model_name,wtname,".CPRDall.subgroup.res.csv",sep=""))
+    #Plots
+    #unadj
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.unadj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+    #simple adj
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.sim,lci=lower.sim,uci=upper.sim)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.simple.adj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+    #Adj plot
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.adj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+  
+    #match to scale of plot for CPRD dev dataset
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+    grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.adj.scalematch.pdf",sep=""),width=8,height=8)
+    hte_plot_fixed(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    dev.off()
 
   #Store main plots
   YODA.lm <- hte_plot_fixed(plotdata,"hba1c_diff.pred","obs","lci","uci")
   YODA.lm.hist <- hist_plot_fixed(final,-2.5,2.3,500)
     
+#### IPTW Weighted
+  
+  #Run HTE models and extract coefs
+    
+    #Define weights
+    final$wt <- final$combwt_s; wtname <- "sglt2wt_s"
+    
+    #Define subsets of interest to calc HTE 
+      #overall
+      overall <- final
+      #sglt2.best
+      sglt2.best <- final %>% dplyr::filter(bestdrug=="SGLT2")
+      #dpp4.best
+      dpp4.best <- final %>% dplyr::filter(bestdrug=="DPP4")
+      #Subgroups by predicted treatment difference
+      df1 <- final %>% dplyr::filter(hba1c_diff<= -10) 
+      df2 <- final %>% dplyr::filter(hba1c_diff<= -5 & hba1c_diff > -10) 
+      df3 <- final %>% dplyr::filter(hba1c_diff<= -3 & hba1c_diff > -5) 
+      df4 <- final %>% dplyr::filter(hba1c_diff> -3 & hba1c_diff <= 0) 
+      df5 <- final %>% dplyr::filter(hba1c_diff> 0 & hba1c_diff < 3) 
+      df6 <- final %>% dplyr::filter(hba1c_diff>= 3) 
+      df7 <- final %>% dplyr::filter(hba1c_diff>= 5) #All DPP4
+      #df8 <- final %>% dplyr::filter(hba1c_diff>= 10) 
     
     
+  #Run HTE models and extract coefs for each subset
+    dflist <- list(overall,sglt2.best,dpp4.best,df1,df2,df3,df4,df5,df6,df7)
+    res.list <- lapply(dflist, function(df) {
+      hte.model.coefs.wt(df,3)
+    })
     
+    res.list <- bind_rows(res.list, .id="column_label")
+    res.lab <- c(rep("overall",3),rep("sglt2.best",3),rep("dpp4.best",3),rep("sglt.best10",3),rep("sglt.best5",3),rep("sglt.best3",3),rep("sglt.best0-3",3),
+                 rep("dpp4.best0-3",3),rep("dpp4.best3",3),rep("dpp4.best5",3))
+    res.list <- data.frame(res.lab,res.list) %>% dplyr::select(-column_label,-datasetname)
+    res.list %>% dplyr::filter(modelname=="unadj") 
+    res.list %>% dplyr::filter(modelname=="pred")
+    res.list %>% dplyr::filter(modelname=="predconf") #final adjusted list
+  
+  #Calibration plot HTE
     
+    #Unadjusted obs vs pred (may be different treatment line etc.)
+    
+      #Define tenths
+      final <- final %>% mutate(hba1c_diff.q = ntile(hba1c_diff, 10))    
+      
+      #define dataset with predicted values
+      t1 <- ddply(final, "hba1c_diff.q", dplyr::summarise,
+                    N    = length(hba1c_diff),
+                    hba1c_diff.pred = mean(hba1c_diff))
+      
+      #check some patients actually prescribed both drugs in each tenth
+      ddply(final, c("hba1c_diff.q","drugclass"), dplyr::summarise,
+                N    = length(posthba1c_final),
+                posthba1c_final.m = mean(posthba1c_final),
+                se = sd(posthba1c_final)/sqrt((length(posthba1c_final))))
+      
+    #obs vs pred, by decile of predicted treatment difference
+    #For Formula 1-3
+        mnumber = c(1:10)
+        models  <- as.list(1:10)
+    
+        hba1c_diff.obs.unadj <- vector()
+        lower.unadj <- vector()
+        upper.unadj <- vector()
+        hba1c_diff.obs.sim <- vector()
+        lower.sim <- vector()
+        upper.sim <- vector() 
+        hba1c_diff.obs.adj <- vector()
+        lower.adj <- vector()
+        upper.adj <- vector() 
+        
+        #Unadj
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula1),data=final,weights=sglt2wt_s, subset=hba1c_diff.q==i)
+          hba1c_diff.obs.unadj <- append(hba1c_diff.obs.unadj,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.unadj <- append(lower.unadj,confint_all[2,1])
+          upper.unadj <- append(upper.unadj,confint_all[2,2])
+        }
+        #pred 
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula2),data=final,weights=sglt2wt_s,subset=hba1c_diff.q==i)
+          hba1c_diff.obs.sim <- append(hba1c_diff.obs.sim,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.sim <- append(lower.sim,confint_all[2,1])
+          upper.sim <- append(upper.sim,confint_all[2,2])
+        }
+        #predconf
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula3),data=final,weights=sglt2wt_s,subset=hba1c_diff.q==i)
+          hba1c_diff.obs.adj <- append(hba1c_diff.obs.adj,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.adj <- append(lower.adj,confint_all[2,1])
+          upper.adj <- append(upper.adj,confint_all[2,2])
+        }
+        
+      #Final data.frame  
+        t1 <- data.frame(t1,cbind(hba1c_diff.obs.unadj,lower.unadj,upper.unadj,
+                                  hba1c_diff.obs.sim,lower.sim,upper.sim,
+                                  hba1c_diff.obs.adj,lower.adj,upper.adj))
+        
+  #Save
+    #Table one by best drug
+    #stargazer(print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F),out=paste(model_name,".CPRDall.bestdrugstrataTable1.html",sep=""))
+    #Histogram of predicted treatment difference
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.tdiff.hist.pdf",sep=""),width=6,height=6)
+    hist_plot_fixed(final,-2.5,2.3,500)
+    #dev.off()
+    #Subgroup results
+    write_csv(res.list,paste0(output_dir,model_name,wtname,".CPRDall.subgroup.res.csv",sep=""))
+    #Plots
+    #unadj
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.unadj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+    #simple adj
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.sim,lci=lower.sim,uci=upper.sim)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.simple.adj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+    #Adj plot
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.adj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+  
+    #match to scale of plot for CPRD dev dataset
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+    grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.adj.scalematch.pdf",sep=""),width=8,height=8)
+    hte_plot_fixed(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    dev.off()
 
+  #Store main plots
+  YODA.lm.sglt2wt_s <- hte_plot_fixed(plotdata,"hba1c_diff.pred","obs","lci","uci")
+  YODA.lm.hist.sglt2wt_s <- hist_plot_fixed(final,-2.5,2.3,500)
     
     
+#### IPTW & CENS Weighted
+  
+  #Run HTE models and extract coefs
     
+    #Define weights
+    final$wt <- final$combwt_s; wtname <- "combwt_s"
+    
+    #Define subsets of interest to calc HTE 
+      #overall
+      overall <- final
+      #sglt2.best
+      sglt2.best <- final %>% dplyr::filter(bestdrug=="SGLT2")
+      #dpp4.best
+      dpp4.best <- final %>% dplyr::filter(bestdrug=="DPP4")
+      #Subgroups by predicted treatment difference
+      df1 <- final %>% dplyr::filter(hba1c_diff<= -10) 
+      df2 <- final %>% dplyr::filter(hba1c_diff<= -5 & hba1c_diff > -10) 
+      df3 <- final %>% dplyr::filter(hba1c_diff<= -3 & hba1c_diff > -5) 
+      df4 <- final %>% dplyr::filter(hba1c_diff> -3 & hba1c_diff <= 0) 
+      df5 <- final %>% dplyr::filter(hba1c_diff> 0 & hba1c_diff < 3) 
+      df6 <- final %>% dplyr::filter(hba1c_diff>= 3) 
+      df7 <- final %>% dplyr::filter(hba1c_diff>= 5) #All DPP4
+      #df8 <- final %>% dplyr::filter(hba1c_diff>= 10) 
+    
+    
+  #Run HTE models and extract coefs for each subset
+    dflist <- list(overall,sglt2.best,dpp4.best,df1,df2,df3,df4,df5,df6,df7)
+    res.list <- lapply(dflist, function(df) {
+      hte.model.coefs.wt(df,3)
+    })
+    
+    res.list <- bind_rows(res.list, .id="column_label")
+    res.lab <- c(rep("overall",3),rep("sglt2.best",3),rep("dpp4.best",3),rep("sglt.best10",3),rep("sglt.best5",3),rep("sglt.best3",3),rep("sglt.best0-3",3),
+                 rep("dpp4.best0-3",3),rep("dpp4.best3",3),rep("dpp4.best5",3))
+    res.list <- data.frame(res.lab,res.list) %>% dplyr::select(-column_label,-datasetname)
+    res.list %>% dplyr::filter(modelname=="unadj") 
+    res.list %>% dplyr::filter(modelname=="pred")
+    res.list %>% dplyr::filter(modelname=="predconf") #final adjusted list
+  
+  #Calibration plot HTE
+    
+    #Unadjusted obs vs pred (may be different treatment line etc.)
+    
+      #Define tenths
+      final <- final %>% mutate(hba1c_diff.q = ntile(hba1c_diff, 10))    
+      
+      #define dataset with predicted values
+      t1 <- ddply(final, "hba1c_diff.q", dplyr::summarise,
+                    N    = length(hba1c_diff),
+                    hba1c_diff.pred = mean(hba1c_diff))
+      
+      #check some patients actually prescribed both drugs in each tenth
+      ddply(final, c("hba1c_diff.q","drugclass"), dplyr::summarise,
+                N    = length(posthba1c_final),
+                posthba1c_final.m = mean(posthba1c_final),
+                se = sd(posthba1c_final)/sqrt((length(posthba1c_final))))
+      
+    #obs vs pred, by decile of predicted treatment difference
+    #For Formula 1-3
+        mnumber = c(1:10)
+        models  <- as.list(1:10)
+    
+        hba1c_diff.obs.unadj <- vector()
+        lower.unadj <- vector()
+        upper.unadj <- vector()
+        hba1c_diff.obs.sim <- vector()
+        lower.sim <- vector()
+        upper.sim <- vector() 
+        hba1c_diff.obs.adj <- vector()
+        lower.adj <- vector()
+        upper.adj <- vector() 
+        
+        #Unadj
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula1),data=final,weights=combwt_s, subset=hba1c_diff.q==i)
+          hba1c_diff.obs.unadj <- append(hba1c_diff.obs.unadj,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.unadj <- append(lower.unadj,confint_all[2,1])
+          upper.unadj <- append(upper.unadj,confint_all[2,2])
+        }
+        #pred 
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula2),data=final,weights=combwt_s,subset=hba1c_diff.q==i)
+          hba1c_diff.obs.sim <- append(hba1c_diff.obs.sim,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.sim <- append(lower.sim,confint_all[2,1])
+          upper.sim <- append(upper.sim,confint_all[2,2])
+        }
+        #predconf
+        for(i in mnumber) {
+          models[[i]] <- lm(as.formula(formula3),data=final,weights=combwt_s,subset=hba1c_diff.q==i)
+          hba1c_diff.obs.adj <- append(hba1c_diff.obs.adj,models[[i]]$coefficients[2])
+          confint_all <- confint(models[[i]], levels=0.95)
+          lower.adj <- append(lower.adj,confint_all[2,1])
+          upper.adj <- append(upper.adj,confint_all[2,2])
+        }
+        
+      #Final data.frame  
+        t1 <- data.frame(t1,cbind(hba1c_diff.obs.unadj,lower.unadj,upper.unadj,
+                                  hba1c_diff.obs.sim,lower.sim,upper.sim,
+                                  hba1c_diff.obs.adj,lower.adj,upper.adj))
+        
+  #Save
+    #Table one by best drug
+    #stargazer(print(tab,noSpaces=TRUE,quote=F,contDigits=1,smd=F),out=paste(model_name,".CPRDall.bestdrugstrataTable1.html",sep=""))
+    #Histogram of predicted treatment difference
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.tdiff.hist.pdf",sep=""),width=6,height=6)
+    hist_plot_fixed(final,-2.5,2.3,500)
+    #dev.off()
+    #Subgroup results
+    write_csv(res.list,paste0(output_dir,model_name,wtname,".CPRDall.subgroup.res.csv",sep=""))
+    #Plots
+    #unadj
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.unadj,lci=lower.unadj,uci=upper.unadj)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.unadj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+    #simple adj
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.sim,lci=lower.sim,uci=upper.sim)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.simple.adj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+    #Adj plot
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+    #grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.adj.pdf",sep=""),width=8,height=8)
+    hte_plot(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    #dev.off()
+  
+    #match to scale of plot for CPRD dev dataset
+    plotdata <- t1 %>% dplyr::mutate(obs=hba1c_diff.obs.adj,lci=lower.adj,uci=upper.adj)
+    grDevices::cairo_pdf(paste0(output_dir,model_name,wtname,".CPRDall.adj.scalematch.pdf",sep=""),width=8,height=8)
+    hte_plot_fixed(plotdata,"hba1c_diff.pred","obs","lci","uci")
+    dev.off()
+
+  #Store main plots
+  YODA.lm.combwt_s <- hte_plot_fixed(plotdata,"hba1c_diff.pred","obs","lci","uci")
+  YODA.lm.hist.combwt_s <- hist_plot_fixed(final,-2.5,2.3,500)
 '''
 
 
