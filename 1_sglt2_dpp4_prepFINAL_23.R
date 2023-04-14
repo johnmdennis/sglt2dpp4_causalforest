@@ -100,6 +100,11 @@ cprd_bckup <- cprd
       cprd <- cprd %>% filter(egfr45==0)
 
 #Require HbA1c between 53 and 120 at baseline (<13%)
+      cprd <- cprd %>% mutate(hb_extreme=if_else(prehba1cmmol<53,1,NA))
+      describe(cprd$hb_extreme)
+      cprd <- cprd %>% mutate(hb_extreme=if_else(prehba1cmmol>120,1,NA))
+      describe(cprd$hb_extreme)
+      
       cprd <- cprd %>% mutate(hb_extreme=if_else(prehba1cmmol<53|prehba1cmmol>120,1,0))
       describe(cprd$hb_extreme)
       table(cprd$hb_extreme)
