@@ -40,9 +40,9 @@ library(patchwork)
 library(grf)
 
 # output directories
-output_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2020_SGLTvDPP4_ML/results/cprd_validation/" 
-model_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/Projects/2020_SGLTvDPP4_ML/models/"
-data_dir <- "C:/Users/jmd237/OneDrive - University of Exeter/John/local/CPRD/cprd/CPRD_19/data/update/"
+output_dir <- "/results/cprd_validation/" 
+model_dir <- "/models/"
+data_dir <- "/data/update/"
 
 ```
 Define functions
@@ -732,7 +732,7 @@ Analysis for paper revision
 
 ```{r add IPCW IPTW}
 #final data prep
-final <- d.rename(final.c) 
+final <- final.c
 
 #Keep only patients with complete predictor set
 final <- final %>% filter(complete.cases(BMI,AGE,malesex,BASELINE.DAY.1,Alanine.Aminotransferase,
